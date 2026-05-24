@@ -245,7 +245,8 @@ class CloudflareTempMailProvider(TempMailProviderBase):
         return settings_repo.get_cf_worker_admin_key()
 
     def _admin_headers(self) -> dict[str, str]:
-        return {"x-admin-auth": self._admin_key(), "Content-Type": "application/json"}
+        admin_key = self._admin_key()
+        return {"x-admin-auth": admin_key, "x-custom-auth": admin_key, "Content-Type": "application/json"}
 
     def _user_headers(self, jwt: str) -> dict[str, str]:
         return {"Authorization": f"Bearer {jwt}", "Content-Type": "application/json"}
@@ -449,6 +450,20 @@ class CloudflareTempMailProvider(TempMailProviderBase):
             }
 
         if not resp.ok:
+            if resp.status_code == 400 and "Address already exists" in resp.text:
+                meta = self._build_meta()
+                meta["provider_capabilities"] = {
+                    "delete_mailbox": False,
+                    "delete_message": False,
+                    "clear_messages": False,
+                }
+                return {
+                    "success": True,
+                    "email": f"{effective_name}@{target_domain}",
+                    "meta": meta,
+                    "provider_name": self.provider_name,
+                    "existed": True,
+                }
             code = _map_cf_http_error(resp.status_code, resp.text)
             return {
                 "success": False,
@@ -530,19 +545,21 @@ class CloudflareTempMailProvider(TempMailProviderBase):
         email_addr = self._coerce_email(mailbox)
         jwt = self._get_jwt(mailbox) if isinstance(mailbox, dict) else ""
 
-        if not jwt:
-            raise CloudflareTempMailProviderError(
-                "UNAUTHORIZED",
-                f"邮箱 {email_addr} 缺少 provider_jwt，无法读取邮件",
-                data={"email": email_addr},
-            )
-
         base_url = self._base_url()
+        if jwt:
+            mail_url = f"{base_url}/api/mails"
+            params = {"limit": 100, "offset": 0}
+            headers = self._user_headers(jwt)
+        else:
+            mail_url = f"{base_url}/admin/mails"
+            params = {"limit": 100, "offset": 0, "address": email_addr}
+            headers = self._admin_headers()
+
         try:
             resp = requests.get(
-                f"{base_url}/api/mails",
-                params={"limit": 100, "offset": 0},
-                headers=self._user_headers(jwt),
+                mail_url,
+                params=params,
+                headers=headers,
                 timeout=_CF_REQUEST_TIMEOUT,
             )
         except requests.Timeout:

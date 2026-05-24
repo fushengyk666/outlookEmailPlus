@@ -329,7 +329,7 @@ class TempMailService:
             failure_code="TEMP_EMAIL_CREATE_FAILED",
             failure_message="临时邮箱创建失败",
             failure_status=502,
-            allow_existing=False,
+            allow_existing=bool(result.get("existed")),
         )
         return mailbox
 
