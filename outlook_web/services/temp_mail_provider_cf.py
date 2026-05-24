@@ -34,6 +34,7 @@ import requests
 
 from outlook_web.repositories import settings as settings_repo
 from outlook_web.services.temp_mail_provider_base import TempMailProviderBase, register_provider
+from outlook_web.services.temp_mail_provider_custom import TempMailProviderReadError
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +52,9 @@ DEFAULT_PREFIX_RULES = {
 # ---------------------------------------------------------------------------
 
 
-class CloudflareTempMailProviderError(Exception):
+class CloudflareTempMailProviderError(TempMailProviderReadError):
     def __init__(self, code: str, message: str, *, data: dict[str, Any] | None = None):
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.data = data or {}
+        super().__init__(code, message, data=data)
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +247,11 @@ class CloudflareTempMailProvider(TempMailProviderBase):
         return {"x-admin-auth": admin_key, "x-custom-auth": admin_key, "Content-Type": "application/json"}
 
     def _user_headers(self, jwt: str) -> dict[str, str]:
-        return {"Authorization": f"Bearer {jwt}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {jwt}", "Content-Type": "application/json"}
+        custom_auth = self._admin_key()
+        if custom_auth:
+            headers["x-custom-auth"] = custom_auth
+        return headers
 
     def _coerce_email(self, mailbox: dict[str, Any] | str) -> str:
         if isinstance(mailbox, dict):
